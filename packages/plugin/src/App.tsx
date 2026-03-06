@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import type { ConnectionStatus, LogEntry } from "./bridge"
 
 interface Props {
   status: ConnectionStatus
   log: LogEntry[]
+  sessionId: string | null
+  restored: boolean
 }
 
 const STATUS_CONFIG = {
@@ -16,8 +18,46 @@ function formatTime(date: Date) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
 }
 
-export function App({ status, log }: Props) {
+function formatUptime(seconds: number) {
+  if (seconds < 60) return `${seconds}s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
+}
+
+export function App({ status, log, sessionId, restored }: Props) {
   const { color, label } = STATUS_CONFIG[status]
+  const [showRestored, setShowRestored] = useState(false)
+  const [uptime, setUptime] = useState(0)
+  const connectedAtRef = useRef<number | null>(null)
+  const uptimeTimer = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Show the "Session restored" badge for 3s when restored fires
+  useEffect(() => {
+    if (restored && status === "connected") {
+      setShowRestored(true)
+      const t = setTimeout(() => setShowRestored(false), 3000)
+      return () => clearTimeout(t)
+    }
+  }, [restored, status])
+
+  // Uptime counter: starts/resets on connect, stops on disconnect
+  useEffect(() => {
+    if (status === "connected") {
+      connectedAtRef.current = Date.now()
+      setUptime(0)
+      uptimeTimer.current = setInterval(() => {
+        setUptime(Math.floor((Date.now() - connectedAtRef.current!) / 1000))
+      }, 1000)
+    } else {
+      if (uptimeTimer.current) {
+        clearInterval(uptimeTimer.current)
+        uptimeTimer.current = null
+      }
+    }
+    return () => {
+      if (uptimeTimer.current) clearInterval(uptimeTimer.current)
+    }
+  }, [status])
 
   return (
     <div style={styles.container}>
@@ -30,13 +70,27 @@ export function App({ status, log }: Props) {
             <span style={{ ...styles.statusLabel, color }}>{label}</span>
           </div>
         </div>
+
+        {/* Session info row */}
+        {sessionId && (
+          <div style={styles.sessionRow}>
+            <span style={styles.sessionChip} title={sessionId}>
+              #{sessionId.slice(-8)}
+            </span>
+            {showRestored && <span style={styles.restoredBadge}>Session restored</span>}
+            {status === "connected" && !showRestored && (
+              <span style={styles.uptime}>{formatUptime(uptime)}</span>
+            )}
+          </div>
+        )}
+
         {status === "disconnected" && (
           <p style={styles.hint}>Start the MCP server and it will reconnect automatically.</p>
         )}
         {status === "connecting" && (
           <p style={styles.hint}>Connecting to ws://localhost:9001…</p>
         )}
-        {status === "connected" && (
+        {status === "connected" && !sessionId && (
           <p style={styles.hint}>Ready. Claude can now control this project.</p>
         )}
       </div>
@@ -106,10 +160,43 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 11,
     fontWeight: 500,
   },
+  sessionRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 4,
+  },
+  sessionChip: {
+    fontSize: 10,
+    fontWeight: 500,
+    color: "#555",
+    background: "#1a1a1a",
+    border: "1px solid #2a2a2a",
+    borderRadius: 4,
+    padding: "1px 5px",
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "0.02em",
+    cursor: "default",
+  },
+  restoredBadge: {
+    fontSize: 10,
+    fontWeight: 500,
+    color: "#22c55e",
+    background: "rgba(34,197,94,0.12)",
+    border: "1px solid rgba(34,197,94,0.25)",
+    borderRadius: 4,
+    padding: "1px 5px",
+  },
+  uptime: {
+    fontSize: 10,
+    color: "#444",
+    fontVariantNumeric: "tabular-nums",
+  },
   hint: {
     color: "#666",
     fontSize: 11,
     lineHeight: 1.4,
+    margin: 0,
   },
   logSection: {
     flex: 1,

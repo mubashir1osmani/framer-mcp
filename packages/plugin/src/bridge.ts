@@ -1,9 +1,11 @@
-import type { BridgeRequest, BridgeResponse } from "./types"
+import { framer } from "framer-plugin"
+import type { BridgeRequest, BridgeResponse, HandshakeMessage, HandshakeAck } from "./types"
 
 const WS_URL = "ws://localhost:9001"
 const RECONNECT_BASE_DELAY_MS = 1000
 const RECONNECT_MAX_DELAY_MS = 30_000
 const MAX_LOG_ENTRIES = 50
+const TOKEN_KEY = "framer-mcp-token"
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected"
 
@@ -16,6 +18,26 @@ export type LogEntry = {
 
 type StatusListener = (status: ConnectionStatus) => void
 type LogListener = (entries: LogEntry[]) => void
+type SessionListener = (info: { sessionId: string; restored: boolean }) => void
+
+function initToken(): string {
+  let token = localStorage.getItem(TOKEN_KEY)
+  if (!token) {
+    token = crypto.randomUUID()
+    localStorage.setItem(TOKEN_KEY, token)
+  }
+  return token
+}
+
+async function getProjectInfo(): Promise<{ name: string; projectId?: string }> {
+  try {
+    const pages = await framer.getPages()
+    // Use first page name as a proxy for project name if no better API is available
+    return { name: pages[0]?.name ?? "Framer Project" }
+  } catch {
+    return { name: "Framer Project" }
+  }
+}
 
 export class PluginBridge {
   private ws: WebSocket | null = null
@@ -25,15 +47,28 @@ export class PluginBridge {
   private handlers = new Map<string, (params: Record<string, unknown>) => Promise<unknown>>()
   private statusListeners: StatusListener[] = []
   private logListeners: LogListener[] = []
+  private sessionListeners: SessionListener[] = []
   private log: LogEntry[] = []
   private _status: ConnectionStatus = "disconnected"
+  private _sessionId: string | null = null
+  private _restored = false
+  readonly token: string
 
   constructor() {
+    this.token = initToken()
     this.connect()
   }
 
   get status(): ConnectionStatus {
     return this._status
+  }
+
+  get sessionId(): string | null {
+    return this._sessionId
+  }
+
+  get restored(): boolean {
+    return this._restored
   }
 
   get logEntries(): LogEntry[] {
@@ -55,6 +90,13 @@ export class PluginBridge {
     this.logListeners.push(listener)
     return () => {
       this.logListeners = this.logListeners.filter((l) => l !== listener)
+    }
+  }
+
+  onSessionChange(listener: SessionListener) {
+    this.sessionListeners.push(listener)
+    return () => {
+      this.sessionListeners = this.sessionListeners.filter((l) => l !== listener)
     }
   }
 
@@ -81,26 +123,46 @@ export class PluginBridge {
     const ws = new WebSocket(WS_URL)
     this.ws = ws
 
-    ws.onopen = () => {
+    ws.onopen = async () => {
       this.reconnectDelay = RECONNECT_BASE_DELAY_MS
-      this.setStatus("connected")
+      // Don't mark connected yet — wait for HandshakeAck
+      const projectInfo = await getProjectInfo()
+      const handshake: HandshakeMessage = {
+        type: "handshake",
+        token: this.token,
+        projectInfo,
+      }
+      ws.send(JSON.stringify(handshake))
     }
 
     ws.onmessage = async (event) => {
-      let request: BridgeRequest
+      let msg: unknown
       try {
-        request = JSON.parse(event.data as string)
+        msg = JSON.parse(event.data as string)
       } catch {
         console.error("[bridge] Failed to parse message")
         return
       }
 
+      // HandshakeAck — server confirmed session
+      if ((msg as { type?: string }).type === "ack") {
+        const ack = msg as HandshakeAck
+        this._sessionId = ack.sessionId
+        this._restored = ack.restoredAt !== null
+        this.setStatus("connected")
+        if (this._sessionId) {
+          this.sessionListeners.forEach((l) =>
+            l({ sessionId: this._sessionId!, restored: this._restored })
+          )
+        }
+        return
+      }
+
+      // Regular BridgeRequest from server
+      const request = msg as BridgeRequest
       const handler = this.handlers.get(request.tool)
       if (!handler) {
-        const response: BridgeResponse = {
-          id: request.id,
-          error: `Unknown tool: ${request.tool}`,
-        }
+        const response: BridgeResponse = { id: request.id, error: `Unknown tool: ${request.tool}` }
         ws.send(JSON.stringify(response))
         return
       }
@@ -109,22 +171,12 @@ export class PluginBridge {
         const result = await handler(request.params)
         const response: BridgeResponse = { id: request.id, result }
         ws.send(JSON.stringify(response))
-        this.addLog({
-          timestamp: new Date(),
-          tool: request.tool,
-          status: "success",
-          message: `OK`,
-        })
+        this.addLog({ timestamp: new Date(), tool: request.tool, status: "success", message: "OK" })
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         const response: BridgeResponse = { id: request.id, error: message }
         ws.send(JSON.stringify(response))
-        this.addLog({
-          timestamp: new Date(),
-          tool: request.tool,
-          status: "error",
-          message,
-        })
+        this.addLog({ timestamp: new Date(), tool: request.tool, status: "error", message })
       }
     }
 

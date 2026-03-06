@@ -11,3 +11,21 @@ export interface BridgeResponse {
   result?: unknown
   error?: string
 }
+
+export interface ProjectInfo {
+  name: string
+  projectId?: string
+}
+
+export interface HandshakeMessage {
+  type: "handshake"
+  token: string
+  projectInfo: ProjectInfo
+}
+
+export interface HandshakeAck {
+  type: "ack"
+  sessionId: string
+  restoredAt: string | null
+  projectInfo: ProjectInfo
+}

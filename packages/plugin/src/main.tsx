@@ -25,17 +25,24 @@ registerDesignHandlers(bridge)
 function Root() {
   const [status, setStatus] = useState<ConnectionStatus>(bridge.status)
   const [log, setLog] = useState<LogEntry[]>(bridge.logEntries)
+  const [sessionId, setSessionId] = useState<string | null>(bridge.sessionId)
+  const [restored, setRestored] = useState(false)
 
   useEffect(() => {
     const unsubStatus = bridge.onStatusChange(setStatus)
     const unsubLog = bridge.onLogChange(setLog)
+    const unsubSession = bridge.onSessionChange(({ sessionId: id, restored: r }) => {
+      setSessionId(id)
+      setRestored(r)
+    })
     return () => {
       unsubStatus()
       unsubLog()
+      unsubSession()
     }
   }, [])
 
-  return <App status={status} log={log} />
+  return <App status={status} log={log} sessionId={sessionId} restored={restored} />
 }
 
 const container = document.getElementById("root")!

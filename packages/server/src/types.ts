@@ -12,6 +12,35 @@ export interface BridgeResponse {
   error?: string
 }
 
+// ── Session / handshake protocol ──────────────────────────────────────────────
+
+export interface ProjectInfo {
+  name: string
+  projectId?: string
+}
+
+export interface HandshakeMessage {
+  type: "handshake"
+  token: string
+  projectInfo: ProjectInfo
+}
+
+export interface HandshakeAck {
+  type: "ack"
+  sessionId: string
+  restoredAt: string | null
+  projectInfo: ProjectInfo
+}
+
+export interface SessionInfo {
+  token: string
+  sessionId: string
+  projectInfo: ProjectInfo
+  connectedAt: string
+  lastSeenAt: string
+  disconnectedAt: string | null
+}
+
 // ── Canvas types ──────────────────────────────────────────────────────────────
 
 export interface NodeInfo {
