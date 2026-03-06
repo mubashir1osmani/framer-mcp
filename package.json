@@ -1,0 +1,14 @@
+{
+  "name": "framer-mcp",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.0.0",
+  "scripts": {
+    "dev:server": "pnpm --filter server dev",
+    "dev:plugin": "pnpm --filter plugin dev",
+    "build": "pnpm --filter server build && pnpm --filter plugin build"
+  },
+  "workspaces": [
+    "packages/*"
+  ]
+}
