@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { createServer } from "node:http"
 import express, { type Request, type Response, type NextFunction } from "express"
+import cors from "cors"
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js"
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js"
@@ -76,6 +77,18 @@ async function main() {
 
   // One transport per MCP session, keyed by the protocol's mcp-session-id header.
   const transports: Record<string, StreamableHTTPServerTransport> = {}
+
+  // Allow browser-based MCP clients to call the server cross-origin and to read
+  // the session id the transport returns. ALLOWED_ORIGINS (comma-separated)
+  // restricts origins; defaults to "*".
+  const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",").map((o) => o.trim())
+  app.use(
+    cors({
+      origin: allowedOrigins ?? "*",
+      exposedHeaders: ["Mcp-Session-Id"],
+      allowedHeaders: ["Content-Type", "Authorization", "Mcp-Session-Id", "Mcp-Protocol-Version"],
+    })
+  )
 
   app.use(express.json())
 
