@@ -1,7 +1,9 @@
 import { framer } from "framer-plugin"
 import type { BridgeRequest, BridgeResponse, HandshakeMessage, HandshakeAck } from "./types"
 
-const WS_URL = "ws://localhost:9001"
+// Point at a remote deploy with VITE_BRIDGE_URL, e.g. wss://framer-mcp.fly.dev/bridge
+const WS_URL =
+  (import.meta.env.VITE_BRIDGE_URL as string | undefined) ?? "ws://localhost:3000/bridge"
 const RECONNECT_BASE_DELAY_MS = 1000
 const RECONNECT_MAX_DELAY_MS = 30_000
 const MAX_LOG_ENTRIES = 50

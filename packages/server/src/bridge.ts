@@ -1,9 +1,10 @@
 import { WebSocketServer, WebSocket } from "ws"
 import { randomUUID } from "crypto"
+import type { Server as HttpServer } from "node:http"
 import type { BridgeRequest, BridgeResponse, HandshakeMessage, HandshakeAck } from "./types.js"
 import { SessionManager, type QueueItem } from "./session.js"
 
-const WS_PORT = 9001
+const WS_PATH = "/bridge"
 const REQUEST_TIMEOUT_MS = 30_000
 const HANDSHAKE_TIMEOUT_MS = 5_000
 
@@ -20,11 +21,12 @@ export class FramerBridge {
   private pending = new Map<string, PendingRequest>()
   private currentToken: string | null = null
 
-  constructor() {
+  constructor(httpServer: HttpServer) {
     this.sessionManager = new SessionManager()
-    this.wss = new WebSocketServer({ port: WS_PORT })
+    // Share the HTTP server so the plugin connects over the same port/TLS at /bridge.
+    this.wss = new WebSocketServer({ server: httpServer, path: WS_PATH })
     this.wss.on("connection", (ws) => this.onConnection(ws))
-    console.error(`[bridge] WebSocket server listening on ws://localhost:${WS_PORT}`)
+    console.error(`[bridge] WebSocket bridge mounted at ${WS_PATH}`)
   }
 
   get isConnected(): boolean {

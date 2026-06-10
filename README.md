@@ -5,13 +5,11 @@ Give Claude full control over your Framer project — canvas, CMS, and design sy
 ## Architecture
 
 ```
-Claude (MCP client)
-      ↕ stdio
-MCP Server (Node.js)
-      ↕ WebSocket :9001
-Framer Plugin (docked panel)
-      ↕ Framer Plugin API
-Your Framer Project
+Claude (MCP client)                 Framer Plugin (docked panel)
+      ↕ Streamable HTTP /mcp               ↕ WebSocket /bridge
+      └──────────► MCP Server (Node.js, one port) ◄──────────┘
+                          ↕ Framer Plugin API
+                     Your Framer Project
 ```
 
 ## Setup
@@ -40,22 +38,86 @@ Open Framer → Plugins → Import from URL → `http://localhost:5173`
 
 The plugin will appear as a docked panel. It shows a green "Connected" dot when the MCP server is running.
 
-### 4. Add to Claude Desktop
+### 4. Run the server
 
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
+```bash
+cd packages/server
+pnpm start            # PORT=3000, WS_PORT=9001 by default
+```
+
+Both surfaces share one port:
+
+- MCP endpoint (Streamable HTTP): `http://localhost:3000/mcp`
+- Plugin bridge (WebSocket): `ws://localhost:3000/bridge`
+- `GET /health` reports status and whether the Framer plugin is connected.
+
+Environment variables:
+
+| Var | Default | Purpose |
+|-----|---------|---------|
+| `PORT` | `3000` | HTTP port serving `/mcp` and `/bridge` |
+| `MCP_AUTH_TOKEN` | _(unset)_ | If set, `/mcp` requires `Authorization: Bearer <token>` |
+
+### 5. Add to an MCP client
+
+For a local client over HTTP:
 
 ```json
 {
   "mcpServers": {
     "framer": {
-      "command": "node",
-      "args": ["/absolute/path/to/framer-mcp/packages/server/dist/index.js"]
+      "type": "http",
+      "url": "http://localhost:3000/mcp"
     }
   }
 }
 ```
 
-Restart Claude Desktop.
+## Deploy to Fly.io
+
+The repo ships a `Dockerfile` and `fly.toml`. Both the MCP endpoint and the
+plugin bridge are served on one port (443 at the edge), so a single Fly service
+covers everything.
+
+```bash
+fly auth login                          # opens a browser
+fly apps create your-unique-app-name    # app names are globally unique
+# set the app name in fly.toml, then optionally require auth:
+fly secrets set MCP_AUTH_TOKEN=$(openssl rand -hex 32) --app your-unique-app-name
+fly deploy --app your-unique-app-name
+```
+
+After deploy:
+
+- MCP URL: `https://your-app.fly.dev/mcp`
+- Bridge URL: `wss://your-app.fly.dev/bridge`
+
+Point the plugin at the deployment by building it with the bridge URL:
+
+```bash
+cd packages/plugin
+VITE_BRIDGE_URL=wss://your-app.fly.dev/bridge pnpm build
+```
+
+Add the remote server to your MCP client (include the header only if you set
+`MCP_AUTH_TOKEN`):
+
+```json
+{
+  "mcpServers": {
+    "framer": {
+      "type": "http",
+      "url": "https://your-app.fly.dev/mcp",
+      "headers": { "Authorization": "Bearer <your-token>" }
+    }
+  }
+}
+```
+
+> **Note:** session state in `~/.framer-mcp/sessions.json` lives on the machine's
+> ephemeral disk and is lost when the machine stops/redeploys. The plugin
+> re-handshakes automatically on reconnect, so this only drops in-flight requests.
+> Mount a Fly volume if you need it to persist.
 
 ## Tools (30 total)
 
